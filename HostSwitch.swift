@@ -136,19 +136,21 @@ class HostSwitchManager: ObservableObject {
                 let originalContent = try String(contentsOfFile: self.hostsFilePath)
                 let newContent = self.updateManagedSection(in: originalContent)
                 
-                // Create a temporary file with the new content
-                let tempFile = "/tmp/hosts_temp_\(UUID().uuidString)"
-                try newContent.write(toFile: tempFile, atomically: true, encoding: .utf8)
+                // Use authopen - integrates with Authorization Services and shows Touch ID
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/libexec/authopen")
+                process.arguments = ["-c", "-w", self.hostsFilePath]
                 
-                let script = """
-                do shell script "cp '\(tempFile)' /etc/hosts; rm '\(tempFile)'" with administrator privileges
-                """
+                let inputPipe = Pipe()
+                process.standardInput = inputPipe
                 
-                let appleScript = NSAppleScript(source: script)
-                var error: NSDictionary?
+                try process.run()
+                inputPipe.fileHandleForWriting.write(newContent.data(using: .utf8)!)
+                try inputPipe.fileHandleForWriting.close()
+                process.waitUntilExit()
                 
                 DispatchQueue.main.async {
-                    if appleScript?.executeAndReturnError(&error) != nil {
+                    if process.terminationStatus == 0 {
                         self.cachedHostsContent = newContent
                         self.statusMessage = "Hosts file updated successfully!"
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -157,13 +159,8 @@ class HostSwitchManager: ObservableObject {
                         self.loadHostsFile()
                     } else {
                         self.statusMessage = nil
-                        if let errorDesc = error?["NSAppleScriptErrorMessage"] as? String {
-                            self.errorMessage = "Failed to update: \(errorDesc)"
-                        } else {
-                            self.errorMessage = "Failed to save hosts file. Administrator privileges required."
-                        }
-                        // Clean up temp file on error
-                        try? FileManager.default.removeItem(atPath: tempFile)
+                        self.errorMessage = "Authorization failed or was cancelled."
+                        self.loadHostsFile()
                     }
                 }
             } catch {
