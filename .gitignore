@@ -33,3 +33,6 @@ Packages/
 *.swp
 *.swo
 *~
+# Built app binary and its signature (run ./build_hostswitch.sh)
+HostSwitch.app/Contents/MacOS/
+HostSwitch.app/Contents/_CodeSignature/
